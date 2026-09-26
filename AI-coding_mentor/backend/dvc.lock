@@ -1,0 +1,58 @@
+schema: '2.0'
+stages:
+  generate_data:
+    cmd: python -m ml.data.generate_synthetic_dataset
+    deps:
+    - path: app/models/language.py
+      hash: md5
+      md5: fb924fbf8c0332e75efc3a75570e7ad0
+      size: 500
+    - path: app/models/question.py
+      hash: md5
+      md5: b11d9c8430fee418fbd88db5ec0854d8
+      size: 2625
+    - path: ml/data/generate_synthetic_dataset.py
+      hash: md5
+      md5: ee2554b8d7e21bf51227ffd7a6ba62c8
+      size: 3703
+    outs:
+    - path: data/raw/skill_training_data.csv
+      hash: md5
+      md5: 81d75945379cafbf7aef92c1ec60b058
+      size: 21929
+  prepare_data:
+    cmd: python -m ml.data.prepare_skill_dataset
+    deps:
+    - path: app/models/language.py
+      hash: md5
+      md5: fb924fbf8c0332e75efc3a75570e7ad0
+      size: 500
+    - path: app/models/question.py
+      hash: md5
+      md5: b11d9c8430fee418fbd88db5ec0854d8
+      size: 2625
+    - path: data/raw/skill_training_data.csv
+      hash: md5
+      md5: 81d75945379cafbf7aef92c1ec60b058
+      size: 21929
+    - path: ml/data/prepare_skill_dataset.py
+      hash: md5
+      md5: c2fcf54e056f3566db51b012bb74a947
+      size: 5694
+    - path: ml/features/skill_features.py
+      hash: md5
+      md5: 04e1ff91f1eaeb19a7375ec1a90d2324
+      size: 3514
+    - path: ml/training/skill_dataset.py
+      hash: md5
+      md5: f80b2e39641bf5ee3118c549e05108be
+      size: 3003
+    outs:
+    - path: data/processed/dataset_metadata.json
+      hash: md5
+      md5: 7f3f77619068bcb5d3b7a5a32de8bb91
+      size: 494
+    - path: data/processed/skill_training_data_processed.csv
+      hash: md5
+      md5: 205809821a8637d22467f0d83c2b9ab1
+      size: 22210

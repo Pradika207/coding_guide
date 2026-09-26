@@ -1,0 +1,186 @@
+name: Backend CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-ci:
+    name: Test and build backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run backend tests
+        run: pytest -q
+
+      - name: Check tracked configuration for accidental secrets
+        working-directory: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+          import sys
+
+          tracked = subprocess.run(
+              ["git", "ls-files", "-z"], check=True, capture_output=True
+          ).stdout.split(b"\0")
+          secret_names = {
+              "JWT_SECRET",
+              "JUDGE0_API_KEY",
+              "MLFLOW_TRACKING_PASSWORD",
+              "MLFLOW_TRACKING_TOKEN",
+              "MLFLOW_TRACKING_USERNAME",
+              "MONGODB_PASSWORD",
+          }
+          assignment = re.compile(
+              r"(?im)^\s*([A-Z][A-Z0-9_]*)\s*[:=]\s*[\"']?([^\"'#\r\n]*)"
+          )
+          uri_names = {"MONGODB_URL", "MONGODB_URI", "MLFLOW_TRACKING_URI"}
+          placeholders = {"", "example", "placeholder", "changeme", "change-me"}
+          placeholders_pattern = re.compile(r"(?i)^(your[-_].*|replace[-_].*|\$\{.*\}|<.*>)$")
+          findings = []
+
+          for entry in tracked:
+              if not entry:
+                  continue
+              relative = entry.decode("utf-8", errors="replace")
+              path = Path(relative)
+              if "tests" in path.parts:
+                  continue
+              if path.suffix.lower() not in {".env", ".example", ".ini", ".json", ".toml", ".yaml", ".yml"} and path.name not in {"Dockerfile", "docker-compose.yml"}:
+                  continue
+              try:
+                  content = path.read_text(encoding="utf-8")
+              except (OSError, UnicodeError):
+                  continue
+              for match in assignment.finditer(content):
+                  name, value = match.group(1), match.group(2).strip()
+                  normalized = value.strip("\"'").strip()
+                  if name in secret_names and normalized.lower() not in placeholders and not placeholders_pattern.fullmatch(normalized):
+                      findings.append(f"{relative}: configured {name}")
+                  if name in uri_names and "://" in normalized:
+                      authority = normalized.split("://", 1)[1].split("/", 1)[0]
+                      userinfo = authority.rsplit("@", 1)[0]
+                      if "@" in authority and ":" in userinfo:
+                          findings.append(f"{relative}: credentials embedded in {name}")
+
+          if findings:
+              print("Potential hardcoded credentials found:", *findings, sep="\n- ", file=sys.stderr)
+              raise SystemExit(1)
+          print("No hardcoded credentials found in tracked configuration.")
+          PY
+
+      - name: Validate DVC pipeline configuration
+        run: |
+          dvc status
+          dvc dag
+
+      - name: Generate and prepare synthetic development data
+        run: |
+          python -m ml.data.generate_synthetic_dataset
+          python -m ml.data.prepare_skill_dataset
+          test -s data/processed/skill_training_data_processed.csv
+          test -s data/processed/dataset_metadata.json
+
+      - name: Validate MLflow integration configuration
+        run: |
+          python -c "from ml.tracking.mlflow_tracker import EXPERIMENT_NAME, REGISTERED_MODEL_NAME; assert EXPERIMENT_NAME and REGISTERED_MODEL_NAME"
+
+      - name: Validate model training without an MLflow server
+        env:
+          SKILL_TRAINING_DATA_PATH: data/processed/skill_training_data_processed.csv
+          SKILL_TRAINING_ENABLE_MLFLOW: "false"
+        run: |
+          python -m scripts.train_skill_model
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          model_path = Path("ml/artifacts/skill_model.joblib")
+          metadata_path = Path("ml/artifacts/skill_metadata.json")
+          assert model_path.is_file() and model_path.stat().st_size > 0
+          metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+          assert metadata["training_source"] == "synthetic_development_data"
+          assert metadata["dataset_version"] == "dataset-v1"
+          assert metadata["mlflow"]["status"] == "disabled"
+          print("Synthetic development model artifacts validated.")
+          PY
+
+      - name: Generate monitoring baseline
+        run: |
+          python -m scripts.create_monitoring_baseline
+          test -s ml/artifacts/monitoring_baseline.json
+
+      - name: Remove generated model to test a clean Docker build context
+        working-directory: .
+        run: rm -f backend/ml/artifacts/skill_model.joblib backend/ml/artifacts/skill_metadata.json
+
+      - name: Build backend Docker image
+        working-directory: .
+        run: docker build -t ai-coding-mentor-backend:ci ./backend
+
+      - name: Start container and smoke-test API
+        working-directory: .
+        run: |
+          docker run --detach --name ai-coding-mentor-backend-ci \
+            --publish 127.0.0.1:8000:8000 \
+            ai-coding-mentor-backend:ci
+          python - <<'PY'
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.request import urlopen
+
+          base_url = "http://127.0.0.1:8000"
+          deadline = time.monotonic() + 60
+          while time.monotonic() < deadline:
+              try:
+                  with urlopen(base_url + "/health", timeout=3) as response:
+                      if response.status == 200 and b"healthy" in response.read():
+                          break
+              except (OSError, URLError):
+                  time.sleep(1)
+          else:
+              raise SystemExit("Container health endpoint did not become ready")
+
+          for endpoint in ("/", "/health", "/languages"):
+              with urlopen(base_url + endpoint, timeout=5) as response:
+                  assert response.status == 200, (endpoint, response.status)
+
+          for endpoint in ("/ml/skill-profile", "/recommendations"):
+              try:
+                  with urlopen(base_url + endpoint, timeout=5) as response:
+                      status = response.status
+              except HTTPError as error:
+                  status = error.code
+              assert status == 401, (endpoint, status)
+
+          print("Container API smoke tests passed; protected routes returned 401.")
+          PY
+
+      - name: Show container logs and clean up
+        if: always()
+        working-directory: .
+        run: |
+          docker logs ai-coding-mentor-backend-ci || true
+          docker rm --force ai-coding-mentor-backend-ci || true

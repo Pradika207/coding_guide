@@ -1,0 +1,21 @@
+stages:
+  generate_data:
+    cmd: python -m ml.data.generate_synthetic_dataset
+    deps:
+      - ml/data/generate_synthetic_dataset.py
+      - app/models/language.py
+      - app/models/question.py
+    outs:
+      - data/raw/skill_training_data.csv
+  prepare_data:
+    cmd: python -m ml.data.prepare_skill_dataset
+    deps:
+      - ml/data/prepare_skill_dataset.py
+      - ml/features/skill_features.py
+      - ml/training/skill_dataset.py
+      - app/models/language.py
+      - app/models/question.py
+      - data/raw/skill_training_data.csv
+    outs:
+      - data/processed/skill_training_data_processed.csv
+      - data/processed/dataset_metadata.json
