@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from app.database.config import settings
 from app.database.mongodb import get_mongodb_client
 from app.routes.skill_ml import skill_model_health
+from app.services import judge0
 from app.services.security import require_admin
 from ml.monitoring.monitoring_service import get_monitoring_service
 from ml.serving.skill_model_service import get_skill_model_service
@@ -75,10 +76,7 @@ def admin_health(_current_user: dict = Depends(require_admin)) -> dict:
             "status": _status_from_bool(get_mongodb_client() is not None),
             "configured": get_mongodb_client() is not None,
         },
-        "judge0": {
-            "status": _status_from_bool(bool(settings.judge0_url)),
-            "configured": bool(settings.judge0_url),
-        },
+        "judge0": judge0.health_status(),
         "ml": {
             "status": "ready" if model_service.ready else "unavailable",
             "model_status": health.body.decode() if hasattr(health, "body") else ("ready" if model_service.ready else "unavailable"),

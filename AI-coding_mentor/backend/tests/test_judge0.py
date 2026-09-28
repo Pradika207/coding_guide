@@ -59,6 +59,86 @@ def test_submit_code_maps_application_language():
     assert client.submission_payload["params"]["wait"] == "false"
 
 
+def test_rapidapi_endpoint_uses_provider_auth_headers(monkeypatch):
+    monkeypatch.setattr(settings, "judge0_url", "https://judge0-ce.p.rapidapi.com")
+    monkeypatch.setattr(settings, "judge0_api_key", "test-api-key")
+
+    assert judge0.Judge0Service._headers() == {
+        "X-RapidAPI-Key": "test-api-key",
+        "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
+    }
+
+
+def test_direct_judge0_endpoint_uses_auth_token_header(monkeypatch):
+    monkeypatch.setattr(settings, "judge0_url", "https://ce.judge0.com")
+    monkeypatch.setattr(settings, "judge0_api_key", "test-api-key")
+
+    assert judge0.Judge0Service._headers() == {"X-Auth-Token": "test-api-key"}
+
+
+def test_check_connectivity_uses_judge0_about_endpoint():
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"version": "1.13.1"})
+
+    client = httpx.Client(
+        base_url="https://judge0.test",
+        transport=httpx.MockTransport(respond),
+    )
+    service = judge0.Judge0Service(client=client)
+    try:
+        service.check_connectivity()
+    finally:
+        client.close()
+
+    assert requests[0].method == "GET"
+    assert requests[0].url.path == "/about"
+
+
+def test_judge0_health_reports_not_configured(monkeypatch):
+    monkeypatch.setattr(settings, "judge0_url", "")
+
+    assert judge0.health_status() == {
+        "status": "not_configured",
+        "configured": False,
+        "reachable": False,
+    }
+
+
+def test_judge0_health_reports_reachable_and_unreachable(monkeypatch):
+    monkeypatch.setattr(settings, "judge0_url", "https://judge0.example")
+
+    class ReachableService:
+        def __init__(self):
+            self.closed = False
+
+        def check_connectivity(self):
+            return None
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(judge0, "Judge0Service", ReachableService)
+    assert judge0.health_status() == {
+        "status": "configured_reachable",
+        "configured": True,
+        "reachable": True,
+    }
+
+    class UnreachableService(ReachableService):
+        def check_connectivity(self):
+            raise judge0.Judge0RequestError("unreachable")
+
+    monkeypatch.setattr(judge0, "Judge0Service", UnreachableService)
+    assert judge0.health_status() == {
+        "status": "configured_unreachable",
+        "configured": True,
+        "reachable": False,
+    }
+
+
 @pytest.mark.parametrize(
     ("status_id", "expected_status"),
     [
@@ -179,6 +259,26 @@ def test_execute_endpoint_valid_request(monkeypatch):
         app.dependency_overrides.clear()
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
+
+
+def test_execute_endpoint_returns_safe_503_when_judge0_is_unavailable(monkeypatch):
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "test-user"}
+
+    def unavailable(**_kwargs):
+        raise judge0.Judge0RequestError("private upstream detail")
+
+    monkeypatch.setattr(judge0, "execute_code", unavailable)
+    try:
+        response = TestClient(app).post(
+            "/code/execute",
+            json={"language": "python", "source_code": "print(1)", "stdin": ""},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Code execution service is unavailable"
+    assert "private upstream detail" not in response.text
 
 
 def test_execute_endpoint_rejects_unsupported_language():

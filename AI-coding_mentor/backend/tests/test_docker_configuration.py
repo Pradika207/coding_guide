@@ -40,7 +40,7 @@ def test_image_configuration_does_not_embed_secrets():
         assert not re.search(r"(?m)^(?:ARG|ENV)\s+JWT_SECRET\s*=\s*\S+", content)
         assert "JUDGE0_API_KEY=" not in content
     assert re.search(r"(?m)^JWT_SECRET=\s*$", environment_example)
-    assert re.search(r"(?m)^JUDGE0_API_URL=\s*$", environment_example)
+    assert re.search(r"(?m)^JUDGE0_URL=https://ce\.judge0\.com\s*$", environment_example)
     assert re.search(r"(?m)^JUDGE0_API_KEY=\s*$", environment_example)
     assert "MLFLOW_TRACKING_URI=" in environment_example
     assert "SKILL_TRAINING_DATA_PATH=" in environment_example

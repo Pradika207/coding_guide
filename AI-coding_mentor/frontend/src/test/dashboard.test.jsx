@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import App from '../App';
@@ -12,19 +12,24 @@ const currentUser = {
   created_at: '2026-01-01T00:00:00Z',
 };
 
+const roadmapTopics = ['fundamentals', 'variables', 'conditionals', 'loops', 'functions', 'arrays', 'strings', 'searching', 'sorting', 'recursion', 'linked_lists', 'stack', 'queue', 'hashing', 'trees', 'graphs', 'dynamic_programming', 'object_oriented_programming'];
+
 const responses = {
   '/auth/me': currentUser,
   '/auth/language': { selected_language: 'python' },
   '/gamification': { total_xp: 1240, level: 4, current_streak: 7, longest_streak: 11, daily_goal_xp: 100, daily_xp: 80, daily_goal_progress: 0.8, daily_goal_completed: false },
   '/gamification/badges': [{ badge_id: 'first-lesson', name: 'First Steps', description: 'Complete your first lesson', criteria_type: 'lesson_completed', criteria_value: 1, icon: 'book', earned_at: '2026-03-01T12:00:00Z' }],
   '/gamification/xp-history?limit=8': [{ event_id: 'evt-1', event_type: 'lesson_completed', source_id: 'lesson-1', xp_amount: 10, created_at: '2026-03-01T12:00:00Z' }],
-  '/roadmap': { roadmap_id: 'map-1', user_id: 'student-1', language: 'python', source_assessment_id: 'assess-1', current_topic: 'arrays', topics: [{ topic: 'fundamentals', order: 1, status: 'completed', score: 91 }, { topic: 'arrays', order: 2, status: 'current', score: null }, { topic: 'sorting', order: 3, status: 'pending', score: null }], created_at: '2026-03-01T00:00:00Z', updated_at: '2026-03-01T00:00:00Z' },
+  '/roadmap': { roadmap_id: 'map-1', user_id: 'student-1', language: 'python', source_assessment_id: 'assess-1', current_topic: 'arrays', topics: roadmapTopics.map((topic, index) => ({ topic, order: index + 1, status: index === 0 ? 'completed' : index === 1 ? 'unlocked' : index === 5 ? 'recommended' : 'locked', score: index === 0 ? 91 : index === 5 ? 64 : null })), created_at: '2026-03-01T00:00:00Z', updated_at: '2026-03-01T00:00:00Z' },
+  '/roadmap/generate': { roadmap_id: 'map-2', user_id: 'student-1', language: 'javascript', source_assessment_id: 'assess-2', current_topic: 'fundamentals', topics: [{ topic: 'fundamentals', order: 1, status: 'recommended', score: null }], created_at: '2026-03-02T00:00:00Z', updated_at: '2026-03-02T00:00:00Z' },
   '/roadmap/current': { topic: 'arrays', status: 'current', reason: 'Recommended next by your assessment' },
   '/lessons/current': { lesson_id: 'lesson-2', topic: 'arrays', title: 'Traversing an Array', progress: 35, status: 'in_progress' },
   '/lessons/lesson-2': { lesson_id: 'lesson-2', topic: 'arrays', title: 'Traversing an Array', description: 'Learn how arrays work through direct indexing and iteration.', content: [{ type: 'concept', title: 'Array access', text: 'Array elements are accessed by their index.' }, { type: 'example', title: 'Example', text: 'numbers[0] gives the first value in the array.' }], quiz_ids: ['quiz-2'], question_ids: ['q-arrays-2'] },
   '/lessons/lesson-2/quiz': { quiz_id: 'quiz-2', question: 'Which term describes selecting a single item from an array by position?', options: ['Index', 'Loop', 'Function', 'Boolean'], correct_option: 'Index', explanation: 'Indexing uses a position to address a specific item.' },
   '/lessons/lesson-2/quiz/complete': { quiz_id: 'quiz-2', score: 100, total_questions: 1, correct_answers: 1, passed: true, xp_awarded: 25 },
   '/lessons/progress/arrays': { topic: 'arrays', total_lessons: 4, completed_lessons: 1, progress_percent: 25 },
+  '/lessons/progress/variables': { topic: 'variables', total_lessons: 4, completed_lessons: 1, progress_percent: 25 },
+  '/lessons?topic=variables': [{ lesson_id: 'lesson-2', topic: 'variables', title: 'Traversing an Array', status: 'in_progress' }],
   '/recommendations/current?limit=4': { status: 'ready', message: null, language: 'python', recommendations: [{ recommendation_id: 'rec-1', question_id: 'q-1', title: 'Find the Maximum', topic: 'arrays', difficulty: 'easy', score: 85, reason: 'Arrays is a developing topic for you.' }], generated_at: '2026-03-01T00:00:00Z' },
   '/ml/skill-profile': { status: 'ready', language: 'python', topics: [{ topic: 'arrays', predicted_skill: 'intermediate', confidence: 0.82, rule_based_skill: 'beginner', status: 'predicted' }] },
   '/assessment/history': [{ session_id: 'session-1', language: 'python', score: 78, skill_level: 'intermediate', created_at: '2026-03-01T00:00:00Z' }],
@@ -77,10 +82,24 @@ describe('student dashboard', () => {
     setupFetch({
       overrides: {
         '/auth/language': { message: 'Programming language updated successfully', user: { ...currentUser, selected_language: 'javascript' } },
-        '/assessment/start': { session_id: 'assess-2', language: 'javascript', status: 'in_progress', questions: [] },
+        '/assessment/start': { session_id: 'assess-2', language: 'javascript', status: 'in_progress', questions: Array.from({ length: 5 }, (_, index) => ({ question_id: `q-assess-${index + 1}`, title: `Challenge ${index + 1}`, description: `Solve challenge ${index + 1}.`, topic: 'strings', difficulty: 'easy', sample_input: 'hello', sample_output: 'olleh', constraints: [] })) },
+        '/assessment/assess-2/submit': { question_id: 'q-assess-1', status: 'accepted', stdout: '', stderr: '', compile_output: '', attempt_number: 2 },
+        '/assessment/assess-2/complete': { session_id: 'assess-2', status: 'completed', score: 0, total_questions: 5, solved_questions: 0, accuracy: 0, language: 'javascript' },
+        '/assessment/assess-2/result': { result_id: 'result-assess-2', session_id: 'assess-2', language: 'javascript', overall_score: 0, accuracy: 0, skill_level: 'beginner', topic_scores: { strings: 0 }, strong_topics: [], weak_topics: ['strings'], recommended_next_topic: 'Strings', created_at: '2026-03-02T00:00:00Z' },
       },
     });
     render(<MemoryRouter initialEntries={['/assessment']}><App /></MemoryRouter>);
+    const normalFetch = global.fetch;
+    const submitResults = [
+      { question_id: 'q-assess-1', status: 'wrong_answer', stdout: '', stderr: '', compile_output: '', attempt_number: 1 },
+      ...Array.from({ length: 5 }, (_, index) => ({ question_id: `q-assess-${Math.min(index + 1, 5)}`, status: 'accepted', stdout: '', stderr: '', compile_output: '', attempt_number: index === 0 ? 2 : 1 })),
+    ];
+    global.fetch = vi.fn((url, options) => {
+      if (new URL(url).pathname.endsWith('/submit')) {
+        return Promise.resolve(new Response(JSON.stringify(submitResults.shift()), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return normalFetch(url, options);
+    });
 
     const languageField = await screen.findByLabelText('Choose a language');
     await user.selectOptions(languageField, 'javascript');
@@ -90,6 +109,35 @@ describe('student dashboard', () => {
       expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/auth/language'), expect.objectContaining({ method: 'PUT' }));
       expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/assessment/start'), expect.objectContaining({ method: 'POST' }));
     });
+    expect(await screen.findByRole('heading', { name: 'Challenge 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /submit answer/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /good to see you/i })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your solution' }), { target: { value: 'function solve() { return "olleh"; }' } });
+    await user.click(screen.getByRole('button', { name: /submit answer/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent('wrong answer');
+    expect(screen.queryByRole('button', { name: /next question/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /submit answer/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent('accepted');
+    await user.click(screen.getByRole('button', { name: /next question/i }));
+    for (let questionNumber = 2; questionNumber <= 5; questionNumber += 1) {
+      expect(await screen.findByRole('heading', { name: `Challenge ${questionNumber}` })).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Your solution' }), { target: { value: 'function solve() { return "olleh"; }' } });
+      await user.click(screen.getByRole('button', { name: /submit answer/i }));
+      expect(await screen.findByRole('status')).toHaveTextContent('accepted');
+      if (questionNumber < 5) await user.click(screen.getByRole('button', { name: /next question/i }));
+    }
+    expect(screen.queryByRole('button', { name: /finish assessment/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /finish assessment/i }));
+    expect(await screen.findByRole('heading', { name: /your results are ready/i })).toBeInTheDocument();
+    expect(screen.getByText('Score: 0%')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /view your learning path/i })).toHaveAttribute('href', '/learn');
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/assessment/assess-2/submit'), expect.objectContaining({ method: 'POST' }));
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/assessment/assess-2/complete'), expect.objectContaining({ method: 'POST' }));
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/assessment/assess-2/result'), expect.objectContaining({ method: 'GET' }));
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/roadmap/generate'), expect.objectContaining({ method: 'POST' }));
+    const requestPaths = global.fetch.mock.calls.map(([url]) => new URL(url).pathname);
+    expect(requestPaths.indexOf('/assessment/assess-2/result')).toBeLessThan(requestPaths.indexOf('/roadmap/generate'));
   });
 
   it('renders gamification values from the backend', async () => {
@@ -180,10 +228,60 @@ describe('student dashboard', () => {
   });
 
   it('renders the protected Learn page and roadmap journey', async () => {
+    const user = userEvent.setup();
     render(<MemoryRouter initialEntries={['/learn']}><App /></MemoryRouter>);
-    expect(await screen.findByRole('heading', { name: /your coding journey/i })).toBeInTheDocument();
-    expect(screen.getByText('Arrays')).toBeInTheDocument();
-    expect(screen.getByText('Continue')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Learning Path' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /fundamentals, completed/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /variables, unlocked/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /arrays, ai recommended/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /arrays, ai recommended/i }).closest('.learning-map-node')).toHaveClass('is-active');
+    expect(screen.getByRole('button', { name: /sorting, locked/i })).toBeDisabled();
+    expect(document.querySelector('.is-final-level')).toHaveTextContent('FINAL CHALLENGE');
+    expect(screen.getByText('not tracked')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /sorting, locked/i }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Coding Valley')).toBeInTheDocument();
+    expect(screen.getByText('Data Structure Forest')).toBeInTheDocument();
+    expect(screen.getByText('Algorithm Mountains')).toBeInTheDocument();
+    expect(screen.getByText('Advanced Observatory')).toBeInTheDocument();
+    expect(document.querySelectorAll('.learning-map-path path')).toHaveLength((roadmapTopics.length - 1) * 2);
+    expect(document.querySelectorAll('.path-completed').length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('.path-future').length).toBeGreaterThan(0);
+    const nodePositions = [...document.querySelectorAll('.learning-map-node')].map((node) => Number.parseFloat(node.style.left));
+    expect(new Set(nodePositions).size).toBeGreaterThan(8);
+
+    await user.click(screen.getByRole('button', { name: /arrays, ai recommended/i }));
+    expect(await screen.findByRole('dialog', { name: 'Arrays' })).toHaveTextContent('AI RECOMMENDED');
+    await user.click(screen.getByRole('button', { name: /close level details/i }));
+
+    await user.click(screen.getByRole('button', { name: /variables, unlocked/i }));
+    expect(await screen.findByRole('dialog', { name: 'Variables' })).toBeInTheDocument();
+    expect(screen.getByText('1 of 4 lessons complete')).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: /start learning/i }));
+    expect(await screen.findByRole('heading', { name: /traversing an array/i })).toBeInTheDocument();
+  });
+
+  it('shows a loading state while the real roadmap request is pending', async () => {
+    setupFetch();
+    let resolveRoadmap;
+    const roadmapRequest = new Promise((resolve) => { resolveRoadmap = resolve; });
+    const fallbackFetch = global.fetch;
+    global.fetch = vi.fn((url, options) => new URL(url).pathname === '/roadmap' ? roadmapRequest : fallbackFetch(url, options));
+
+    render(<MemoryRouter initialEntries={['/learn']}><App /></MemoryRouter>);
+    expect(await screen.findByText('Loading your real learning path…')).toBeInTheDocument();
+    resolveRoadmap(new Response(JSON.stringify(responses['/roadmap']), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    expect(await screen.findByRole('button', { name: /arrays, ai recommended/i })).toBeInTheDocument();
+  });
+
+  it('shows a real assessment prompt instead of inventing levels when no roadmap exists', async () => {
+    setupFetch({ overrides: { '/roadmap': { __status: 404, body: { detail: 'roadmap not found' } } } });
+    render(<MemoryRouter initialEntries={['/learn']}><App /></MemoryRouter>);
+
+    expect(await screen.findByRole('heading', { name: 'Your adventure starts here' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /take assessment/i })).toHaveAttribute('href', '/assessment');
+    expect(document.querySelector('.has-empty-world .empty-world-art')).toBeInTheDocument();
+    expect(document.querySelectorAll('.learning-map-node')).toHaveLength(0);
   });
 
   it('loads a lesson and supports quiz submission', async () => {

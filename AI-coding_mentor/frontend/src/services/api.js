@@ -23,7 +23,7 @@ const messages = {
   500: 'We could not load this right now. Please try again.',
 };
 
-async function request(path, { method = 'GET', body, auth = true, signal } = {}) {
+async function request(path, { method = 'GET', body, auth = true, signal, allowServiceUnavailableDetail = false } = {}) {
   const headers = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const token = auth ? tokenStore.get() : null;
@@ -56,7 +56,9 @@ async function request(path, { method = 'GET', body, auth = true, signal } = {})
     }
     const safeMessage = response.status === 401 && !auth
       ? 'Email or password could not be verified.'
-      : response.status >= 500
+      : response.status === 503 && allowServiceUnavailableDetail && detail
+        ? detail
+        : response.status >= 500
         ? 'We could not load this right now. Please try again.'
         : messages[response.status] || detail || 'Something went wrong. Please try again.';
     throw new ApiError(response.status, safeMessage);
@@ -71,8 +73,11 @@ export const api = {
   language: () => request('/auth/language'),
   selectLanguage: (language) => request('/auth/language', { method: 'PUT', body: { language } }),
   startAssessment: () => request('/assessment/start', { method: 'POST' }),
+  submitAssessmentCode: (sessionId, payload) => request(`/assessment/${encodeURIComponent(sessionId)}/submit`, { method: 'POST', body: payload, allowServiceUnavailableDetail: true }),
+  completeAssessment: (sessionId) => request(`/assessment/${encodeURIComponent(sessionId)}/complete`, { method: 'POST' }),
   roadmap: () => request('/roadmap'),
   getRoadmap: () => request('/roadmap'),
+  generateRoadmap: () => request('/roadmap/generate', { method: 'POST' }),
   currentRoadmapTopic: () => request('/roadmap/current'),
   currentLesson: () => request('/lessons/current'),
   getCurrentLesson: () => request('/lessons/current'),

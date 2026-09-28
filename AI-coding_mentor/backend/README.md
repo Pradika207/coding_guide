@@ -18,6 +18,20 @@ Endpoints:
 
 Copy `.env.example` to `.env` and provide local environment values when MongoDB is introduced. No database connection is required for the current health endpoints.
 
+### Sandboxed Code Execution
+
+Assessment and practice code run through the backend's Judge0 client; submitted
+source code is never executed inside FastAPI. The sample `.env.example` selects
+the official hosted Judge0 CE endpoint. If using that public endpoint, no API
+key is required. For a managed RapidAPI Judge0 CE subscription, set
+`JUDGE0_URL=https://judge0-ce.p.rapidapi.com` and put the account key in
+`JUDGE0_API_KEY` in the ignored local `.env`; the backend sends RapidAPI headers
+server-side. Direct authenticated Judge0 CE instances use `X-Auth-Token`.
+
+Restart the backend after changing these variables. An admin can check
+`GET /admin/health` for `not_configured`, `configured_unreachable`, or
+`configured_reachable`. Health responses never include the endpoint credentials.
+
 ## MLOps Development Setup
 
 The skill model training script records parameters, weighted classification metrics, metadata, and the sklearn model in the MLflow experiment `AI-Coding-Mentor-Skill-Prediction`. If the configured tracking server is not running, training falls back to the ignored local `mlruns/` file store.

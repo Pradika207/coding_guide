@@ -23,6 +23,13 @@ describe('dashboard API client', () => {
     await expect(api.me()).rejects.toMatchObject({ name: 'ApiError', status: 403, message: 'You do not have access to this information.' });
   });
 
+  it('shows the sanitized 503 reason when assessment code execution is unavailable', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: 'Code execution service is not configured' }), { status: 503 }));
+
+    await expect(api.submitAssessmentCode('session-1', { question_id: 'q1', source_code: 'print(1)', stdin: '' }))
+      .rejects.toMatchObject({ status: 503, message: 'Code execution service is not configured' });
+  });
+
   it('clears an expired token and dispatches session-expired on 401', async () => {
     tokenStore.set('expired-token');
     const onExpired = vi.fn();

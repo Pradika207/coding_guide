@@ -102,7 +102,7 @@ def submit_assessment_code(
         ) from error
     except judge0.Judge0RequestError as error:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Code execution service is unavailable",
         ) from error
     except (PyMongoError, RuntimeError) as error:

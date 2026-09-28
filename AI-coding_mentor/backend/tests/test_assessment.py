@@ -15,6 +15,7 @@ from app.models.language import ProgrammingLanguage
 from app.services import assessment as assessment_service
 from app.services import judge0
 from app.services import questions as question_service
+from app.services import submissions as submission_service
 from app.services.security import get_current_user
 
 
@@ -193,6 +194,24 @@ def test_submit_supports_attempts_and_hidden_tests(monkeypatch):
     assert len(submissions.documents) == 2
 
 
+def test_submit_returns_safe_503_when_judge0_is_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        submission_service,
+        "submit_assessment_code",
+        lambda **_kwargs: (_ for _ in ()).throw(judge0.Judge0RequestError("private upstream detail")),
+    )
+    client = _authenticated_client()
+    try:
+        response = client.post(
+            "/assessment/session-1/submit",
+            json={"question_id": "q1", "source_code": "print(1)", "stdin": ""},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Code execution service is unavailable"
+    assert "private upstream detail" not in response.text
 def test_completed_session_rejects_submission(monkeypatch):
     session = {"user_id": "user-1", "status": "completed", "question_ids": ["q1"]}
     monkeypatch.setattr(assessment_service, "get_owned_session", lambda **_: session)

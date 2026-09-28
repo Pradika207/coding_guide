@@ -1,6 +1,7 @@
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -113,11 +114,25 @@ class Judge0Service:
         if self._owns_client:
             self._client.close()
 
+    def check_connectivity(self) -> None:
+        try:
+            response = self._client.get("/about")
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise Judge0RequestError("Judge0 health check failed") from error
+
     @staticmethod
     def _headers() -> dict[str, str]:
-        if settings.judge0_api_key:
-            return {"X-Auth-Token": settings.judge0_api_key}
-        return {}
+        if not settings.judge0_api_key:
+            return {}
+
+        host = urlparse(settings.judge0_url).hostname
+        if host and host.endswith(".rapidapi.com"):
+            return {
+                "X-RapidAPI-Key": settings.judge0_api_key,
+                "X-RapidAPI-Host": host,
+            }
+        return {"X-Auth-Token": settings.judge0_api_key}
 
     def submit_code(
         self,
@@ -235,3 +250,29 @@ def execute_code(
         )
     finally:
         service.close()
+
+
+def health_status() -> dict[str, bool | str]:
+    if not settings.judge0_url:
+        return {
+            "status": "not_configured",
+            "configured": False,
+            "reachable": False,
+        }
+
+    service = Judge0Service()
+    try:
+        service.check_connectivity()
+    except Judge0RequestError:
+        return {
+            "status": "configured_unreachable",
+            "configured": True,
+            "reachable": False,
+        }
+    finally:
+        service.close()
+    return {
+        "status": "configured_reachable",
+        "configured": True,
+        "reachable": True,
+    }
